@@ -5,11 +5,16 @@ Created on Sun Mar 11 20:28:00 2018
 @author: moseli
 """
 
-import midi,numpy,numpy as np
+
+import midi
+import numpy,numpy as np
 import logging
 import pickle as pick
 import datetime
+import pandas as pd
 import os
+import sys
+import re
 
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s',\
     level=logging.INFO)
@@ -25,8 +30,13 @@ output_location="C:\\Users\\Deeps\\Documents\\School\\MIT807\\Code\\output\\"
 ####################################Constants################################
 lowerBound = 21
 upperBound = 109
+scale= upperBound-lowerBound
 threshold = 0.5
 ##############################################################################
+
+count_notes={}
+songs=[]
+num_notes=[]
 
 
 """---------------------------------------------------------------------------------------"""
@@ -34,13 +44,15 @@ class midiIO:
               
     #creates state matrix from a midi file
     def midiToNoteStateMatrix(self,midifile):
+        getname=True
         pattern = midi.read_midifile(midifile)
         timeleft = [track[0].tick for track in pattern]
         posns = [0 for track in pattern]
         statematrix = []
         span = upperBound-lowerBound
         time = 0
-    
+        numberofnotes=0
+        
         state = [[0,0] for x in range(span)]
         statematrix.append(state)
         while True:
@@ -61,6 +73,7 @@ class midiIO:
                             pass
                             # print "Note {} at time {} out of bounds (ignoring)".format(evt.pitch, time)
                         else:
+                            numberofnotes+=1
                             if isinstance(evt, midi.NoteOffEvent) or evt.velocity == 0:
                                 state[evt.pitch-lowerBound] = [0, 0]
                             else:
@@ -84,7 +97,7 @@ class midiIO:
                 break
     
             time += 1
-    
+        #num_notes.append(numberofnotes)
         return statematrix
     
         #Looad all songs and convert to state matrices
@@ -112,7 +125,7 @@ class midiIO:
         pattern.append(track)
         
         span = upperBound-lowerBound
-        tickscale = 65
+        tickscale = 120
         
         lastcmdtime = 0
         prevstate = [[0,0] for x in range(span)]
@@ -131,10 +144,10 @@ class midiIO:
                 elif n[0] == 1:
                     onNotes.append(i)
             for note in offNotes:
-                track.append(midi.NoteOffEvent(tick=(time-lastcmdtime)*tickscale,channel=10,pitch=note+lowerBound))
+                track.append(midi.NoteOffEvent(tick=(time-lastcmdtime)*tickscale,channel=1,pitch=note+lowerBound))
                 lastcmdtime = time
             for note in onNotes:
-                track.append(midi.NoteOnEvent(tick=(time-lastcmdtime)*tickscale,channel=10,velocity=70, pitch=note+lowerBound))
+                track.append(midi.NoteOnEvent(tick=(time-lastcmdtime)*tickscale,channel=1,velocity=70, pitch=note+lowerBound))
                 lastcmdtime = time
                 
             prevstate = state
@@ -185,15 +198,32 @@ class statematrixmanipulation:
     		statematrix.append(newState)
     	return statematrix
     
-    def createTrainingData(self,database,x_len=100,y_len=300):
-        x=[]
-        y=[]
-        for song in database:
-            song2=statematrixmanipulation.flatStateMatrix(self,song)
-            x.append(song2[:x_len])
-            y.append(song2[x_len:x_len+y_len])
-        return np.array(x),np.array(y)
-    
+    def createTrainingData(self,database,GAN,x_len=100,y_len=300):
+        
+        if not GAN:
+            x=[]
+            y=[]
+            for song in database:
+                song2=statematrixmanipulation.flatStateMatrix(self,song)
+                x.append(song2[:x_len])
+                y.append(song2[x_len:x_len+y_len])
+            return np.array(x),np.array(y)
+        else:
+            x = []
+            y = []
+            #real data
+            for song in database:
+                song2=statematrixmanipulation.flatStateMatrix(self,song)
+                x.append(song2[x_len:x_len+y_len])
+                y.append(1)
+            #fake data
+            for randsong in range(int(len(database)/2)):
+                song3 = np.random.normal(size=(y_len,scale*2))
+                #x.append(song3)
+                #y.append(0)   
+            return np.array(x),np.array(y)
+            
+
     
 class picklehandler:
         #save data in pickle file    
@@ -213,7 +243,8 @@ class picklehandler:
     #load data dictionary
     def loadPickle(self,location,fileName):
         with open('%s%s.pickle'%(location,fileName), 'rb') as f:
-            new_data_variable = pick.load(f)
+            new_data_variable = pick.load(f,encoding='latin1')
+            #new_data_variable = pick.load(f)
         return new_data_variable
     
     #save one song for python 2.7
@@ -244,13 +275,13 @@ for k in range(len(dataset)):
     print(len(dataset[k]))
 
 manip = statematrixmanipulation(True)
-training_data=manip.createTrainingData(dataset)
+training_data=manip.createTrainingData(dataset,GAN=True)
 
 x=training_data[0]
 y=training_data[1]
 
 pickler=picklehandler()
-pickler.pickleFickle(x,y,"pianoroll38")
+pickler.pickleFickle(x,y,"GAN6")
 
 #########################################################################################
 #######################For output only, after generating in python3######################
@@ -261,5 +292,21 @@ gensong=pickler.loadPickle(output_location,"tempsong")
 #unflatten
 statemanip=statematrixmanipulation(True)
 gensongmatrix=statemanip.unflattenStateMatrix(gensong)
-parser.noteStateMatrixToMidi(gensongmatrix,name="seventeenth")
+parser.noteStateMatrixToMidi(gensongmatrix,name="new_encodeco6")
 #####################################################################
+
+songs2=songs[:211]
+#Find number of notes
+songs3=[]
+for song in songs2:
+    songs3.append(song.split("\\")[-2])
+
+"""
+count_notes['composer']=songs3
+count_notes['notes']= num_notes
+
+
+allnotes=pd.DataFrame(count_notes)
+allnotes.groupby('composer').sum()
+allnotes['notes'].sum() + 79516 + 81470
+"""

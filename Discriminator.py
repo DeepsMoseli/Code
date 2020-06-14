@@ -11,6 +11,7 @@ import random
 from sklearn.model_selection import train_test_split as tts
 import logging
 
+
 import numpy as np
 import keras
 from keras import backend as k
@@ -28,12 +29,20 @@ logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s',\
     level=logging.INFO)
 
 #######################model params###########################
-batch_size = 50
+batch_size = 4
 num_classes = 1
-epochs = 10
-hidden_units = 128
-learning_rate = 0.1
+epochs = 100
+Gz_epochs=200
+hidden_units = 512
+learning_rate = 0.0001
 clip_norm = 2.0
+
+#######################if loaded from pickle###########################
+pickler=picklehandler()
+data = pickler.loadPickle(ProcData_location,"GAN1_4_9_2018")   
+x= data['x']
+y= data['y']
+#######################################################################
 
 
 #######################################################################
@@ -50,35 +59,38 @@ def Generator(data,z):
     #Bidirectional LSTM CELL
     generator_LSTM = LSTM(hidden_units,return_sequences=True,return_state=True)
     generator_LSTM_rev=LSTM(hidden_units,return_state=True,return_sequences=True,go_backwards=True)
+    generator_LSTM_last = LSTM(hidden_units,return_sequences=True,return_state=True)
     
     gen_outputs, _, _ = generator_LSTM(generator_inputs)
     gen_outputs_r, _, _ = generator_LSTM_rev(generator_inputs)
-    generator_outputs_final = Add()([gen_outputs,gen_outputs_r])
+    generator_outputs_final= Add()([gen_outputs,gen_outputs_r])
+    
+    generator_outputs_final2,_,_ = generator_LSTM_last(generator_outputs_final)
     
     #dense layers
-    #generator_dense = Dense(int(hidden_units), activation = 'linear')(generator_outputs_final)
-    generator_dense2 = Dense(np.shape(data)[-1], activation = 'relu')(generator_outputs_final)   
+    generator_dense = Dense(hidden_units, activation = 'tanh')(generator_outputs_final2)
+    generator_dense2 = Dense(np.shape(data)[-1], activation = 'relu')(generator_dense)   
     
     model= Model(inputs=generator_inputs, outputs=generator_dense2)
     print(model.summary())
     
     
-    #rmsprop = RMSprop(lr=learning_rate,clipnorm=clip_norm)
+    rmsprop = RMSprop(lr=learning_rate,clipnorm=clip_norm)
 
-    model.compile(loss='mean_squared_error',optimizer='adam',metrics=['mae', 'acc'])
+    model.compile(loss='binary_crossentropy',optimizer=rmsprop,metrics=["accuracy"])
     
     latent = np.random.normal(size=(realshape[0],realshape[1],z))
     
     x_train,x_test,y_train,y_test=tts(latent,data,test_size=0.20, random_state=40)
     history= model.fit(x=x_train,y=y_train,
               batch_size=batch_size,
-              epochs=epochs,
+              epochs=Gz_epochs,
               verbose=1,
               validation_data=(x_test, y_test))
     
     scores = model.evaluate(x_test,y_test, verbose=1)
     print(scores)
-    return model
+    return model,history
     
 
 
@@ -97,7 +109,7 @@ def Discriminator(data,labels):
     discriminator_outputs_final=Add()([discriminator_outputs,discriminator_outputs_rev])
     
     #First dense layer
-    discriminator_dense = Dense(int(hidden_units/2),activation='linear')
+    discriminator_dense = Dense(int(hidden_units),activation='relu')
     discriminator_outputs_final = discriminator_dense(discriminator_outputs_final)
     
     #last dense to output a probability
@@ -108,8 +120,6 @@ def Discriminator(data,labels):
     print(model.summary())
     
     model.compile(loss='binary_crossentropy',optimizer='Adam',metrics=['accuracy'])
-    
-    #data,labels=random.shuffle((data,labels))
     
     x_train,x_test,y_train,y_test=tts(data,labels,test_size=0.20, random_state=42)
     history= model.fit(x=x_train,y=y_train,
@@ -125,15 +135,43 @@ def Discriminator(data,labels):
     return model,history
 
 
+def cleanupsamples(samples):
+    for k in range(len(samples)):
+        for p in range(len(samples[k])):
+            for j in range(len(samples[k][p])):
+                if samples[k][p][j]<0.05:
+                    samples[k][p][j]=0
+                else:
+                    samples[k][p][j]=1
+    return samples
+                    
+
 #############################################################################################
 ################################Test`
 #############################################################################################
 
-G_z = Generator(dataset,hidden_units*2)
+gendata=x[:40]
+G_z,historyGz = Generator(gendata,hidden_units)
 
-pp=G_z.predict(np.random.normal(size=(10,2000,hidden_units*2)))
+pp=G_z.predict(np.random.normal(size=(5,100,hidden_units)))
+pp2=cleanupsamples(pp)
+pickler.SaveSongForGen(pp2[7])
 
-D_x,historyDx= Discriminator(x_data,y_data)
+
+x2=list(x)
+y2=list(y)
+pp3=list(pp2)
+for p in pp3:
+    x2.append(p)
+    y2.append(0)
+
+x2=np.array(x2)
+y2=np.array(y2)
+
+D_x,historyDx= Discriminator(x2,y2)
+D_x.predict(np.reshape(pp2[3],(1,100,176)))
+
+
 
 
 
